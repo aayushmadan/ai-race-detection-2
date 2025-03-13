@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DeepFace Race Detection</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #video-container, #result-container {
+            margin-top: 20px;
+        }
+        #video {
+            width: 100%;
+            max-width: 640px;
+            border: 1px solid #ccc;
+        }
+        #canvas {
+            display: none;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 10px 0;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        .hidden {
+            display: none;
+        }
+        #loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .progress-container {
+            width: 100%;
+            background-color: #f1f1f1;
+            border-radius: 4px;
+            margin: 5px 0;
+        }
+        .progress-bar {
+            height: 20px;
+            border-radius: 4px;
+            background-color: #4CAF50;
+            text-align: center;
+            color: white;
+            line-height: 20px;
+        }
+        #captured-image {
+            max-width: 300px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <h1>DeepFace Race Detection</h1>
+    
+    <div id="video-container">
+        <h2>Camera Feed</h2>
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+        <div>
+            <button id="start-camera">Start Camera</button>
+            <button id="capture">Capture Image</button>
+            <button id="upload-photo">Upload Photo</button>
+            <input type="file" id="photo-upload" accept="image/*" style="display: none;">
+        </div>
+    </div>
+    
+    <div id="result-container" class="hidden">
+        <h2>Detection Result</h2>
+        <div id="loader" class="hidden"></div>
+        <img id="captured-image" class="hidden">
+        <div id="result"></div>
+        <button id="try-again">Try Again</button>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const context = canvas.getContext('2d');
+            const startButton = document.getElementById('start-camera');
+            const captureButton = document.getElementById('capture');
+            const uploadButton = document.getElementById('upload-photo');
+            const fileInput = document.getElementById('photo-upload');
+            const resultContainer = document.getElementById('result-container');
+            const result = document.getElementById('result');
+            const tryAgainButton = document.getElementById('try-again');
+            const loader = document.getElementById('loader');
+            const capturedImage = document.getElementById('captured-image');
+            
+            let stream = null;
+
+            // Start camera stream
+            startButton.addEventListener('click', async function() {
+                try {
+                    if (stream) {
+                        const tracks = stream.getTracks();
+                        tracks.forEach(track => track.stop());
+                    }
+                    
+                    stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { 
+                            facingMode: 'user',
+                            width: { ideal: 640 },
+                            height: { ideal: 480 }
+                        } 
+                    });
+                    video.srcObject = stream;
+                    canvas.width = video.videoWidth || 640;
+                    canvas.height = video.videoHeight || 480;
+                } catch (err) {
+                    console.error('Error accessing camera:', err);
+                    alert('Could not access the camera. Please make sure you have given permission.');
+                }
+            });
+
+            // Capture image from camera
+            captureButton.addEventListener('click', function() {
+                if (!stream) {
+                    alert('Please start the camera first.');
+                    return;
+                }
+                
+                // Draw current video frame onto canvas
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // Show captured image
+                capturedImage.src = canvas.toDataURL('image/jpeg');
+                capturedImage.classList.remove('hidden');
+                
+                // Get image data and process
+                processImageData();
+            });
+
+            // Handle photo upload
+            uploadButton.addEventListener('click', function() {
+                fileInput.click();
+            });
+            
+            fileInput.addEventListener('change', function(e) {
+                if (e.target.files.length > 0) {
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        const img = new Image();
+                        img.onload = function() {
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            context.drawImage(img, 0, 0);
+                            
+                            // Show uploaded image
+                            capturedImage.src = canvas.toDataURL('image/jpeg');
+                            capturedImage.classList.remove('hidden');
+                            
+                            processImageData();
+                        };
+                        img.src = event.target.result;
+                    };
+                    reader.readAsDataURL(e.target.files[0]);
+                }
+            });
+            
+            // Try again button
+            tryAgainButton.addEventListener('click', function() {
+                resultContainer.classList.add('hidden');
+                capturedImage.classList.add('hidden');
+            });
+
+            // Process and send image data to server
+            function processImageData() {
+                // Show loader
+                loader.classList.remove('hidden');
+                resultContainer.classList.remove('hidden');
+                result.textContent = '';
+                
+                // Get image data from canvas
+                const imageData = canvas.toDataURL('image/jpeg');
+                
+                // Send to server
+                fetch('/process_image', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ image: imageData })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    loader.classList.add('hidden');
+                    if (data.error) {
+                        result.textContent = 'Error: ' + data.error;
+                    } else {
+                        // Create HTML for results
+                        let resultsHtml = `<p><strong>Dominant Race:</strong> ${data.race.charAt(0).toUpperCase() + data.race.slice(1)}</p>
+                                          <p><strong>Confidence:</strong> ${data.confidence.toFixed(2)}%</p>
+                                          <h3>All Detected Races:</h3>`;
+                        
+                        // Add progress bars for all races
+                        for (const [race, value] of Object.entries(data.all_races)) {
+                            const percentage = (value * 100).toFixed(2);
+                            resultsHtml += `
+                                <div>
+                                    <span>${race.charAt(0).toUpperCase() + race.slice(1)}: ${percentage}%</span>
+                                    <div class="progress-container">
+                                        <div class="progress-bar" style="width:${percentage}%"></div>
+                                    </div>
+                                </div>`;
+                        }
+                        
+                        result.innerHTML = resultsHtml;
+                    }
+                })
+                .catch(error => {
+                    loader.classList.add('hidden');
+                    result.textContent = 'Error communicating with server: ' + error;
+                    console.error('Error:', error);
+                });
+            }
+        });
+    </script>
+</body>
+</html>
